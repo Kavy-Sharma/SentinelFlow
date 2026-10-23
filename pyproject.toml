@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinelflow"
+version = "0.1.0"
+description = "Explainable Hybrid Network Intrusion Detection System"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "SentinelFlow Team" }
+]
+dependencies = [
+    "scapy>=2.5.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "scikit-learn>=1.4.0",
+    "joblib>=1.4.0",
+    "streamlit>=1.35.0",
+    "plotly>=5.20.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pytest>=8.0.0",
+    "pyyaml>=6.0.1",
+]
+
+[project.scripts]
+sentinelflow = "sentinelflow.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sentinelflow*"]

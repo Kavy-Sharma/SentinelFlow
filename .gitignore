@@ -1,0 +1,51 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Streamlit local configurations
+.streamlit/
+
+# PCAP files and captures (large network traces)
+*.pcap
+*.pcapng
+*.cap
+data/raw/*
+!data/raw/.gitkeep
+
+# Processed flow datasets and cache
+data/processed/*
+!data/processed/.gitkeep
+
+# Trained ML models and serialized artifacts
+*.joblib
+*.pkl
+data/models/*
+!data/models/.gitkeep

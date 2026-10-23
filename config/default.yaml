@@ -1,0 +1,91 @@
+# SentinelFlow Central Configuration File
+# All thresholds, model hyperparameters, and pipeline settings are defined here.
+
+project:
+  name: "SentinelFlow"
+  version: "0.1.0"
+  random_seed: 42
+
+paths:
+  raw_pcaps: "data/raw"
+  processed_flows: "data/processed"
+  models_dir: "data/models"
+  reports_dir: "docs/reports"
+
+feature_extraction:
+  # Per-source time-window feature aggregation settings
+  window:
+    size_seconds: 10.0
+    step_seconds: 2.0
+  # Bidirectional flow timeout settings
+  flow:
+    idle_timeout_seconds: 15.0
+    active_timeout_seconds: 120.0
+
+rules:
+  # Port Scan Detection (MITRE T1046)
+  port_scan:
+    enabled: true
+    min_unique_ports: 20
+    time_window_seconds: 10.0
+    min_syn_ratio: 0.8
+    severity: 70
+    confidence: "HIGH"
+
+  # SYN Flood Detection (MITRE T1498.001)
+  syn_flood:
+    enabled: true
+    syn_packet_rate_per_sec: 100.0
+    syn_ack_ratio_threshold: 4.0
+    severity: 85
+    confidence: "HIGH"
+
+  # UDP Flood Detection (MITRE T1498.001)
+  udp_flood:
+    enabled: true
+    udp_packet_rate_per_sec: 150.0
+    min_packet_count: 500
+    severity: 80
+    confidence: "HIGH"
+
+  # SSH Brute Force Detection (MITRE T1110.001)
+  ssh_brute_force:
+    enabled: true
+    target_port: 22
+    attempts_per_window: 10
+    time_window_seconds: 30.0
+    max_payload_bytes: 4096
+    severity: 75
+    confidence: "MEDIUM"
+
+  # ARP Spoofing Detection (MITRE T1557.002)
+  arp_spoof:
+    enabled: true
+    max_macs_per_ip: 1
+    unsolicited_reply_threshold: 5
+    severity: 90
+    confidence: "HIGH"
+
+ml:
+  model_type: "IsolationForest"
+  hyperparameters:
+    n_estimators: 100
+    max_samples: "auto"
+    contamination: 0.05
+    random_state: 42
+    n_jobs: -1
+  explainability:
+    top_n_features: 5
+    z_score_threshold: 2.5
+  baseline:
+    min_benign_samples: 500
+
+fusion:
+  # Score arbitration weights
+  weights:
+    rule_score: 0.6
+    ml_anomaly_score: 0.4
+  confidence_escalation:
+    both_triggered: "HIGH"
+    rule_only: "MEDIUM"
+    ml_only: "LOW"
