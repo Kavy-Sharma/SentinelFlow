@@ -20,7 +20,7 @@ setup:
 	$(PYTHON) -m pip install -e .
 
 generate-data:
-	$(PYTHON) -m sentinelflow.generator
+	$(PYTHON) -m sentinelflow.generator --scenario all --seed 42 --out data/pcaps --generate-holdout
 
 detect:
 	$(PYTHON) -m sentinelflow.cli detect data/raw/sample.pcap

@@ -39,6 +39,10 @@ dist/
 *.cap
 data/raw/*
 !data/raw/.gitkeep
+data/pcaps/*
+!data/pcaps/.gitkeep
+data/pcaps_holdout/*
+!data/pcaps_holdout/.gitkeep
 
 # Processed flow datasets and cache
 data/processed/*
@@ -49,3 +53,6 @@ data/processed/*
 *.pkl
 data/models/*
 !data/models/.gitkeep
+
+# Scratch directories
+scratch/
