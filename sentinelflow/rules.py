@@ -95,6 +95,9 @@ class Alert:
             source_ip=self.src_ip,
             target_ip=self.dst_ip,
             timestamp=self.window_start,
+            window_end=self.window_end,
+            duration=max(0.0, self.window_end - self.window_start),
+            merged_windows_count=self.merged_windows_count,
             summary=summary,
         )
 
@@ -204,6 +207,7 @@ def detect_port_scan(
         ports = int(row.get("unique_dst_ports", 0))
         syn_without_ack = float(row.get("syn_without_ack_fraction", 0.0))
         tcp_share = float(row.get("tcp_share", 0.0))
+        syn_count = int(row.get("syn_count", 0))
         src_ip = str(row.get("src_ip", ""))
         w_start = float(row.get("win_start", 0.0))
         w_end = float(row.get("win_end", 0.0))
@@ -213,8 +217,9 @@ def detect_port_scan(
         if ports >= min_ports:
             matched_conds.append(f"Destination port diversity ({ports}) >= threshold ({min_ports})")
 
-        # Port scans exhibit either high unacknowledged SYN fraction or pure TCP dominance
-        if ports >= min_ports and (syn_without_ack >= 0.4 or tcp_share >= min_syn_ratio):
+        # Port scans originate probes: elevated SYN count or high unacknowledged SYN fraction
+        has_probe_activity = (syn_without_ack >= 0.3) or (syn_count >= 10)
+        if ports >= min_ports and has_probe_activity and (tcp_share >= min_syn_ratio or syn_without_ack >= 0.3):
             matched_conds.append(
                 f"Elevated SYN ratio / unacknowledged handshakes ({syn_without_ack:.1%}) indicates scan probes"
             )
@@ -458,12 +463,18 @@ def detect_ssh_bruteforce(
     windows_df: pd.DataFrame,
     config: Optional[Dict[str, Any]] = None,
     packets_df: Optional[pd.DataFrame] = None,
+    flows_df: Optional[pd.DataFrame] = None,
 ) -> List[Alert]:
     """Detect repeated SSH authentication guessing attacks (MITRE T1110.001).
 
     Detection Strategy:
-    High frequency of distinct, short TCP sessions focused on port 22 with small
-    cryptographic payloads and failed handshakes/resets.
+    High frequency of distinct, short TCP sessions focused specifically on port 22 with
+    small cryptographic payloads and rapid authentication attempts.
+
+    Port Verification:
+    Requires explicit port-level evidence (from packets_df, flows_df, or dst_port metadata)
+    verifying destination port 22. Never infers SSH targeting solely from generic
+    connection counts or packet size distributions.
     """
     if windows_df.empty:
         return []
@@ -489,11 +500,13 @@ def detect_ssh_bruteforce(
         mean_pkt_size = float(row.get("mean_packet_size", 0.0))
         conn_max = int(row.get("connections_to_same_dst_port_max", 0))
 
-        # Check via packet inspection if packets_df is available, otherwise feature estimation
+        # Check for explicit port-level evidence targeting TCP port 22
+        has_port_evidence = False
         ssh_attempts = 0
         target_ip: Optional[str] = None
 
         if packets_df is not None and not packets_df.empty:
+            has_port_evidence = True
             mask = (
                 (packets_df["src_ip"] == src_ip)
                 & (packets_df["ts"] >= w_start)
@@ -503,16 +516,39 @@ def detect_ssh_bruteforce(
             )
             ssh_pkts = packets_df[mask]
             if not ssh_pkts.empty:
-                # Count distinct source ports attempting port 22
                 ssh_attempts = int(ssh_pkts["src_port"].nunique())
                 target_ip = str(ssh_pkts["dst_ip"].mode()[0])
-        else:
-            # Feature fallback: connections_to_same_dst_port_max
-            ssh_attempts = conn_max
+        elif flows_df is not None and not flows_df.empty:
+            has_port_evidence = True
+            mask = (
+                (flows_df["src_ip"] == src_ip)
+                & (flows_df["proto"] == "TCP")
+                & (flows_df["dst_port"] == target_port)
+            )
+            if "start" in flows_df.columns:
+                mask &= (flows_df["start"] >= w_start) & (flows_df["start"] < w_end)
+            ssh_flows = flows_df[mask]
+            if not ssh_flows.empty:
+                ssh_attempts = len(ssh_flows)
+                target_ip = str(ssh_flows["dst_ip"].mode()[0])
+        elif "dst_port" in row and pd.notna(row.get("dst_port")):
+            has_port_evidence = True
+            if int(row.get("dst_port")) == target_port:
+                ssh_attempts = conn_max or int(row.get("packet_count", 0))
+                target_ip = str(row.get("dst_ip", "")) if pd.notna(row.get("dst_ip")) else None
+        elif "target_port" in row and pd.notna(row.get("target_port")):
+            has_port_evidence = True
+            if int(row.get("target_port")) == target_port:
+                ssh_attempts = conn_max or int(row.get("packet_count", 0))
+                target_ip = str(row.get("dst_ip", "")) if pd.notna(row.get("dst_ip")) else None
 
-        # Trigger condition: high concentrated connection attempts with short lifecycle
+        # If required port-level evidence is unavailable, do not fire based only on generic features
+        if not has_port_evidence:
+            continue
+
+        # Trigger condition: actual repeated connection attempts to port 22 with short session lifecycle
         thresh = max(3, int(attempts_thresh * (duration / 30.0))) if duration < 25.0 else attempts_thresh
-        if (ssh_attempts >= thresh or conn_max >= attempts_thresh) and (short_fraction >= 0.4 or mean_pkt_size <= 600.0):
+        if ssh_attempts >= thresh and (short_fraction >= 0.4 or mean_pkt_size <= 600.0):
             matched_conds = [
                 f"Repeated connection attempts ({ssh_attempts}) targeting port {target_port} >= threshold ({thresh})",
                 f"Short/aborted session fraction ({short_fraction:.1%}) characteristic of authentication failure loops",

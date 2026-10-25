@@ -12,10 +12,14 @@ Tests:
 - Conversion of Alert to AlertExplanation schema
 """
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 from sentinelflow.attack_map import AlertExplanation, ConfidenceLevel
+from sentinelflow.features import extract_window_features
+from sentinelflow.parser import parse_pcap
 from sentinelflow.rules import (
     Alert,
     detect_all_rules,
@@ -163,9 +167,10 @@ def test_detect_udp_flood_positive_and_negative() -> None:
 
 def test_detect_ssh_bruteforce_positive_and_negative() -> None:
     """Verify SSH brute force detector flags repeated connection attempts with short sessions."""
-    # Positive case: 18 repeated short sessions to single port
+    # Positive case: 18 repeated short sessions to single port with explicit port-level evidence (port 22)
     pos_row = _make_base_window(
         src_ip="192.168.1.180",
+        dst_port=22,
         connections_to_same_dst_port_max=18,
         short_connection_fraction=0.88,
         mean_packet_size=240.0,
@@ -174,12 +179,28 @@ def test_detect_ssh_bruteforce_positive_and_negative() -> None:
     # Negative case: Normal single interactive SSH connection
     neg_row = _make_base_window(
         src_ip="192.168.1.10",
+        dst_port=22,
         connections_to_same_dst_port_max=1,
         short_connection_fraction=0.0,
         mean_packet_size=120.0,
     )
+    # Negative case: High connection count targeting different port (port 873)
+    neg_diff_port = _make_base_window(
+        src_ip="192.168.1.50",
+        dst_port=873,
+        connections_to_same_dst_port_max=30,
+        short_connection_fraction=0.9,
+        mean_packet_size=200.0,
+    )
+    # Negative case: High connection count without port-level evidence
+    neg_no_port = _make_base_window(
+        src_ip="192.168.1.60",
+        connections_to_same_dst_port_max=30,
+        short_connection_fraction=0.9,
+        mean_packet_size=200.0,
+    )
 
-    df = pd.DataFrame([pos_row, neg_row])
+    df = pd.DataFrame([pos_row, neg_row, neg_diff_port, neg_no_port])
     alerts = detect_ssh_bruteforce(df)
 
     assert len(alerts) == 1
@@ -188,6 +209,24 @@ def test_detect_ssh_bruteforce_positive_and_negative() -> None:
     assert alert.src_ip == "192.168.1.180"
     assert alert.mitre_technique_id == "T1110.001"
     assert alert.observed["ssh_connection_attempts"] == 18
+
+
+def test_flash_crowd_does_not_trigger_ssh_bruteforce() -> None:
+    """Regression test: High-volume legitimate backup (rsync port 873) must not trigger RULE-SSH-BRUTE."""
+    pcap_path = Path("data/pcaps/s5_flash_crowd.pcap")
+    if not pcap_path.is_file():
+        pytest.skip("s5_flash_crowd.pcap not available for regression testing")
+
+    pkts = parse_pcap(pcap_path)
+    wins = extract_window_features(pkts, window_size=5.0)
+
+    alerts = detect_ssh_bruteforce(wins, packets_df=pkts)
+    assert len(alerts) == 0, f"Expected 0 SSH brute-force alerts on flash crowd, got {len(alerts)}"
+
+    all_rule_alerts = detect_all_rules(wins, packets_df=pkts)
+    ssh_alerts = [a for a in all_rule_alerts if a.rule_id == "RULE-SSH-BRUTE"]
+    assert len(ssh_alerts) == 0, f"Expected 0 SSH brute-force alerts in all_rules, got {len(ssh_alerts)}"
+
 
 
 def test_detect_arp_spoofing_positive_and_negative() -> None:
